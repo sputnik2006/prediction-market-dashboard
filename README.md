@@ -67,14 +67,15 @@ Polymarket's JSON-encoded `outcomes`/`outcomePrices`/`clobTokenIds`). History is
 Matching is the core of the product, in three layers (`lib/aggregate.ts` → `lib/match.ts`):
 
 1. **Event-level alignment** (`lib/events.seed.ts` + `lib/entities.ts`) — a registry maps a
-   Polymarket event to a Kalshi series, then aligns their outcomes by **canonical entity**: a
-   person/team/country canonicalizer with an alias table (AOC, RFK, DJT, J.D.↔JD Vance, …)
-   pairs "Marco Rubio" on one venue with "Marco Rubio" on the other. Covers the 2028 elections
-   (President + party nominees) and the **2026 World Cup** (Polymarket's FIFA event ↔ Kalshi's
-   `KXMENWORLDCUP` "World Soccer Cup Winner", ~45 countries aligned by name). The Kalshi series
-   is **fetched directly** (not from the corpus), so a series below the top-volume pages still
-   gets its full candidate field. This is where most verified pairs come from; extend the
-   registry to add leagues (NBA/NHL/UCL/EPL — they just need their team rosters in the aliases).
+   Polymarket event to a Kalshi series, then aligns their outcomes by **entity**. Persons and
+   countries match on a canonical name + alias table (AOC, RFK, J.D.↔JD Vance, USA↔United
+   States…); teams match by **token overlap**, so Kalshi's "Sacramento" lines up with
+   Polymarket's "Sacramento Kings" and "LA Clippers" isn't confused with the Lakers — no
+   per-team roster needed. Covers the **2028 elections** (President + party nominees), the
+   **2026 World Cup** (`KXMENWORLDCUP`, ~46 countries), the **NBA** (`KXNBA`, 30) and the
+   **NHL** (`KXNHL`, 32) — **~108 sports pairs**. The Kalshi series is **fetched directly**
+   (not from the corpus), so a series below the top-volume pages still gets its full field.
+   Adding another league is one registry line (a Kalshi series + a Polymarket event slug).
 2. **IDF-weighted fuzzy fallback** — for everything else, weighted token overlap with guard
    rails: same category, a **question-type guard** (rejects "who will *win*" vs "who will *run*"
    vs "*nominee*"), and a number/year guard (rejects "≥25bps" vs "50bps").

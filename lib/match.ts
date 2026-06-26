@@ -147,6 +147,24 @@ function makePair(
   };
 }
 
+const TEAM_STOP = new Set(["the", "fc", "cf", "afc", "sc", "club"]);
+
+/** Distinctive tokens of a team/club label (drops generic suffixes). */
+function teamTokens(s: string): Set<string> {
+  return new Set(
+    s
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t && !TEAM_STOP.has(t))
+  );
+}
+
+function tokenOverlap(a: Set<string>, b: Set<string>): number {
+  let n = 0;
+  for (const t of a) if (b.has(t)) n++;
+  return n;
+}
+
 /**
  * Build cross-exchange pairs: curated seed first (verified), then fuzzy match
  * the remainder. The fuzzy matcher uses IDF-weighted token overlap so the rare
@@ -169,23 +187,49 @@ export function buildPairs(
   // shared categorical event by canonical entity. Same event + same entity ⇒
   // resolution-equivalent, so these are high-confidence.
   for (const { em, polyMarkets: evPoly } of eventInputs) {
+    const kInSeries = kalshiMarkets.filter((m) => m.seriesTicker === em.kalshiSeries);
     const kByEnt = new Map<string, Market>();
-    for (const m of kalshiMarkets) {
-      if (m.seriesTicker !== em.kalshiSeries) continue;
+    for (const m of kInSeries) {
       const e = canonicalEntity(m.subtitle ?? "", em.matchBy);
       if (e && !kByEnt.has(e)) kByEnt.set(e, m);
     }
+    // For teams, also keep token sets so "Sacramento" ↔ "Sacramento Kings" and
+    // "Man Utd" ↔ "Manchester United" can align when the exact canonical doesn't.
+    const kTok =
+      em.matchBy === "team"
+        ? kInSeries.map((m) => ({ m, toks: teamTokens(m.subtitle ?? "") }))
+        : [];
+
     for (const p of evPoly) {
+      if (usedP.has(p.nativeId)) continue;
       const e = canonicalEntity(p.subtitle ?? "", em.matchBy);
-      if (!e) continue;
-      const k = kByEnt.get(e);
-      if (!k || usedP.has(p.nativeId) || usedK.has(k.nativeId)) continue;
+      let k = e ? kByEnt.get(e) : undefined;
+
+      if ((!k || usedK.has(k.nativeId)) && em.matchBy === "team") {
+        const pt = teamTokens(p.subtitle ?? "");
+        if (pt.size) {
+          let best: Market | undefined;
+          let score = 0;
+          for (const { m, toks } of kTok) {
+            if (usedK.has(m.nativeId)) continue;
+            const s = tokenOverlap(pt, toks);
+            if (s > score) {
+              score = s;
+              best = m;
+            }
+          }
+          if (best && score >= 1) k = best;
+        }
+      }
+
+      if (!k || usedK.has(k.nativeId)) continue;
+      const key = (e || k.subtitle || p.subtitle || "").toLowerCase().replace(/\s+/g, "-");
       usedP.add(p.nativeId);
       usedK.add(k.nativeId);
       pairs.push(
         makePair(
-          `event:${em.key}:${e.replace(/\s+/g, "-")}`,
-          `${em.label} — ${k.subtitle ?? p.subtitle ?? ""}`,
+          `event:${em.key}:${key}`,
+          `${em.label} — ${p.subtitle ?? k.subtitle ?? ""}`,
           p,
           k,
           "verified",

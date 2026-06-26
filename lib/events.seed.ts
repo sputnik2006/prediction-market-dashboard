@@ -53,4 +53,23 @@ export const EVENT_MATCHES: EventMatch[] = [
     kalshiSeries: "KXMENWORLDCUP",
     matchBy: "team",
   },
+  {
+    // NBA champion: Kalshi tags by city ("Sacramento"), Polymarket by full name
+    // ("Sacramento Kings") — aligned by token overlap.
+    key: "nba-2027",
+    label: "2027 NBA Champion",
+    category: "Sports",
+    polyEventSlug: "nba-2027-champion",
+    kalshiSeries: "KXNBA",
+    matchBy: "team",
+  },
+  {
+    // NHL / Stanley Cup champion.
+    key: "nhl-2027",
+    label: "2027 Stanley Cup",
+    category: "Sports",
+    polyEventSlug: "nhl-2027-champion-20260612185656162",
+    kalshiSeries: "KXNHL",
+    matchBy: "team",
+  },
 ];
