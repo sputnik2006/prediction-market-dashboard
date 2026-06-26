@@ -13,8 +13,13 @@ export function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   const port = process.env.PORT || "3000";
-  const url = `http://127.0.0.1:${port}/api/pairs`;
-  const warm = () => fetch(url).then(() => {}).catch(() => {});
+  const base = `http://127.0.0.1:${port}`;
+  // Warm the two heavy endpoints: pairs (corpus + matching) and arb (walks books).
+  const warm = () =>
+    Promise.all([
+      fetch(`${base}/api/pairs`).catch(() => {}),
+      fetch(`${base}/api/arb`).catch(() => {}),
+    ]).then(() => {});
 
   // The server may still be compiling at boot — retry a few times early to catch
   // the ready moment, then settle into a steady keep-warm under the 180s TTL.
