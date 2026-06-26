@@ -67,10 +67,14 @@ Polymarket's JSON-encoded `outcomes`/`outcomePrices`/`clobTokenIds`). History is
 Matching is the core of the product, in three layers (`lib/aggregate.ts` → `lib/match.ts`):
 
 1. **Event-level alignment** (`lib/events.seed.ts` + `lib/entities.ts`) — a registry maps a
-   Polymarket event (e.g. `presidential-election-winner-2028`) to a Kalshi series
-   (`KXPRESPERSON`), then aligns their outcomes by **canonical entity**: a person/team
-   canonicalizer with an alias table (AOC, RFK, DJT, J.D.↔JD Vance, …) pairs "Marco Rubio" on
-   one venue with "Marco Rubio" on the other. This is where most verified pairs come from.
+   Polymarket event to a Kalshi series, then aligns their outcomes by **canonical entity**: a
+   person/team/country canonicalizer with an alias table (AOC, RFK, DJT, J.D.↔JD Vance, …)
+   pairs "Marco Rubio" on one venue with "Marco Rubio" on the other. Covers the 2028 elections
+   (President + party nominees) and the **2026 World Cup** (Polymarket's FIFA event ↔ Kalshi's
+   `KXMENWORLDCUP` "World Soccer Cup Winner", ~45 countries aligned by name). The Kalshi series
+   is **fetched directly** (not from the corpus), so a series below the top-volume pages still
+   gets its full candidate field. This is where most verified pairs come from; extend the
+   registry to add leagues (NBA/NHL/UCL/EPL — they just need their team rosters in the aliases).
 2. **IDF-weighted fuzzy fallback** — for everything else, weighted token overlap with guard
    rails: same category, a **question-type guard** (rejects "who will *win*" vs "who will *run*"
    vs "*nominee*"), and a number/year guard (rejects "≥25bps" vs "50bps").

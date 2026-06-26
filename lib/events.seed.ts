@@ -43,4 +43,14 @@ export const EVENT_MATCHES: EventMatch[] = [
     kalshiSeries: "KXPRESNOMR",
     matchBy: "person",
   },
+  {
+    // Polymarket "2026 FIFA World Cup" ↔ Kalshi "2026 World Soccer Cup Winner";
+    // both list one market per country, aligned by canonical country name.
+    key: "world-cup-2026",
+    label: "2026 World Cup",
+    category: "Sports",
+    polyEventSlug: "world-cup-winner",
+    kalshiSeries: "KXMENWORLDCUP",
+    matchBy: "team",
+  },
 ];

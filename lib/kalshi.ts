@@ -55,7 +55,13 @@ function midOrLast(
   ask: number | null,
   last: number | null
 ): number | null {
-  if (bid != null && ask != null && ask >= bid && ask > 0) return (bid + ask) / 2;
+  if (bid != null && ask != null && ask >= bid && ask > 0) {
+    // A full-width two-sided quote (≈1¢ / 99¢) is a market-maker placeholder, not
+    // a real market — its 50% midpoint is meaningless. Defer to a real last trade,
+    // else report "no price" rather than a misleading 50%.
+    if (ask - bid >= 0.9) return last != null && last > 0 ? last : null;
+    return (bid + ask) / 2;
+  }
   if (last != null && last > 0) return last;
   if (ask != null && ask > 0) return ask;
   if (bid != null) return bid;
@@ -238,6 +244,48 @@ export async function searchKalshi(q: string): Promise<Market[]> {
       .toLowerCase()
       .includes(n)
   );
+}
+
+/**
+ * Fetch every market of a Kalshi SERIES directly (e.g. KXMENWORLDCUP). Registered
+ * cross-exchange events often sit below the top-volume corpus, so we pull the full
+ * candidate field straight from the series for outcome alignment.
+ */
+export async function fetchKalshiSeriesMarkets(series: string): Promise<Market[]> {
+  const url = `${config.kalshi.baseUrl}/events${qs({
+    series_ticker: series,
+    with_nested_markets: true,
+  })}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const body = await fetchJson<{ events?: KEvent[] }>(url);
+      const nowIso = new Date().toISOString();
+      const out: Market[] = [];
+      for (const ev of body.events ?? []) {
+        const ms = ev.markets ?? [];
+        for (const m of ms) {
+          out.push(
+            mapMarket(
+              m,
+              {
+                series_ticker: ev.series_ticker ?? series,
+                category: ev.category,
+                title: ev.title,
+                event_ticker: ev.event_ticker,
+              },
+              ms.length,
+              nowIso
+            )
+          );
+        }
+      }
+      if (out.length) return out;
+    } catch {
+      /* retry transient */
+    }
+    await sleep(300 * (attempt + 1));
+  }
+  return [];
 }
 
 export async function fetchKalshiMarket(ticker: string): Promise<Market | null> {

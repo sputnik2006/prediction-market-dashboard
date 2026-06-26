@@ -1,4 +1,4 @@
-import { fetchKalshiMarket, fetchKalshiMarkets } from "./kalshi";
+import { fetchKalshiMarket, fetchKalshiMarkets, fetchKalshiSeriesMarkets } from "./kalshi";
 import {
   fetchPolymarketEvent,
   fetchPolymarketMarket,
@@ -38,12 +38,24 @@ async function buildResolvePairs(): Promise<{
   // Event-level alignment inputs: fetch each shared event's full candidate field
   // from Polymarket (live only). Kalshi candidates come from the cached corpus.
   let eventInputs: { em: EventMatch; polyMarkets: Market[] }[] = [];
+  // Each registered event: fetch the Polymarket candidate field AND the Kalshi
+  // series directly (the series often sits below the top-volume corpus), then
+  // merge the Kalshi markets in so outcome alignment sees the full field.
   const eventTask: Promise<void> = polyLive
     ? Promise.all(
-        EVENT_MATCHES.map(async (em) => ({
-          em,
-          polyMarkets: await fetchPolymarketEvent(em.polyEventSlug),
-        }))
+        EVENT_MATCHES.map(async (em) => {
+          const [polyMarkets, kalshiMarkets] = await Promise.all([
+            fetchPolymarketEvent(em.polyEventSlug),
+            fetchKalshiSeriesMarkets(em.kalshiSeries),
+          ]);
+          for (const m of kalshiMarkets) {
+            if (!kMap.has(m.nativeId)) {
+              kalshi.push(m);
+              kMap.set(m.nativeId, m);
+            }
+          }
+          return { em, polyMarkets };
+        })
       ).then((r) => {
         eventInputs = r.filter((e) => e.polyMarkets.length > 0);
       })
