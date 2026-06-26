@@ -3,6 +3,7 @@
 import { ArrowRight, AlertTriangle } from "lucide-react";
 import { Card, VENUE_LABEL } from "./ui";
 import { cn, daysUntil, formatMoney, formatSize } from "@/lib/utils";
+import { RISK_FREE_RATE } from "@/lib/arb";
 import type { ArbResult, Divergence } from "@/lib/types";
 
 function Header() {
@@ -60,6 +61,9 @@ export function ArbPanel({
   }
 
   const days = daysUntil(closeTime);
+  const rfPct = (RISK_FREE_RATE * 100).toFixed(0);
+  const annPct = arb.annualizedRoi != null ? arb.annualizedRoi * 100 : null;
+  const beatsRF = arb.annualizedRoi != null && arb.annualizedRoi >= RISK_FREE_RATE;
 
   return (
     <Card className="p-4">
@@ -87,12 +91,8 @@ export function ArbPanel({
         <Metric
           label="ROI"
           value={`${(arb.roi * 100).toFixed(1)}%`}
-          sub={
-            arb.annualizedRoi != null
-              ? `${(arb.annualizedRoi * 100).toFixed(1)}%/yr`
-              : undefined
-          }
-          accent="text-up"
+          sub={annPct != null ? `${annPct.toFixed(1)}%/yr` : undefined}
+          accent={annPct == null || beatsRF ? "text-up" : "text-warn"}
         />
         <Metric
           label="Edge / share"
@@ -100,6 +100,23 @@ export function ArbPanel({
           sub={`touch ${(arb.bestEdge * 100).toFixed(2)}¢`}
         />
       </div>
+
+      {annPct != null &&
+        (beatsRF ? (
+          <p className="mt-2.5 text-[11px] text-up">
+            ✓ Beats the ~{rfPct}%/yr risk-free rate — a real edge even with capital locked.
+          </p>
+        ) : (
+          <p className="mt-2.5 flex items-start gap-1.5 rounded border border-warn/30 bg-warn/10 px-2 py-1.5 text-[11px] leading-relaxed text-fg-muted">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warn" />
+            <span>
+              <span className="font-medium text-warn">Below risk-free — </span>
+              {annPct.toFixed(1)}%/yr annualized vs ~{rfPct}%/yr risk-free
+              {days != null && days > 0 ? ` (capital locked ~${days}d)` : ""}. A T-bill beats
+              this — a spread, not a real edge.
+            </span>
+          </p>
+        ))}
 
       {divergence && divergence.status !== "equivalent" && (
         <p className="mt-2.5 flex items-start gap-1.5 rounded border border-down/30 bg-down/10 px-2 py-1.5 text-[11px] leading-relaxed text-fg-muted">

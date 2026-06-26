@@ -5,6 +5,7 @@ import { useArb } from "@/lib/hooks";
 import { ConfidenceBadge, Skeleton, VENUE_LABEL } from "./ui";
 import { DivergenceFlag } from "./DivergencePanel";
 import { divergenceFor } from "@/lib/divergence";
+import { RISK_FREE_RATE } from "@/lib/arb";
 import { cn, formatMoney, formatProb, formatSize } from "@/lib/utils";
 
 export function ArbRadar() {
@@ -24,6 +25,7 @@ export function ArbRadar() {
               <th className="px-3 py-2 text-left font-medium">Market</th>
               <th className="px-3 py-2 text-right font-medium">Polymarket</th>
               <th className="px-3 py-2 text-right font-medium">Kalshi</th>
+              <th className="px-3 py-2 text-right font-medium">Spread</th>
               <th className="px-3 py-2 text-right font-medium">Net profit*</th>
               <th className="px-3 py-2 text-right font-medium">Fillable</th>
               <th className="px-3 py-2 text-right font-medium">ROI (ann.)</th>
@@ -51,6 +53,9 @@ export function ArbRadar() {
                   </td>
                   <td className="px-3 py-2 text-right tabular">{formatProb(r.polyYes)}</td>
                   <td className="px-3 py-2 text-right tabular">{formatProb(r.kalshiYes)}</td>
+                  <td className="px-3 py-2 text-right tabular font-medium text-warn">
+                    {formatProb(Math.abs((r.polyYes ?? 0) - (r.kalshiYes ?? 0)))}
+                  </td>
                   <td
                     className={cn(
                       "px-3 py-2 text-right tabular",
@@ -62,14 +67,29 @@ export function ArbRadar() {
                   <td className="px-3 py-2 text-right tabular text-fg-muted">
                     {a.hasArb ? formatSize(a.fillableSize) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-right tabular text-fg-muted">
-                    {a.hasArb
-                      ? `${(a.roi * 100).toFixed(1)}%${
-                          a.annualizedRoi != null
-                            ? ` (${(a.annualizedRoi * 100).toFixed(1)}/yr)`
-                            : ""
-                        }`
-                      : "—"}
+                  <td className="px-3 py-2 text-right tabular">
+                    {a.hasArb ? (
+                      <>
+                        <span className="text-fg-muted">{(a.roi * 100).toFixed(1)}%</span>
+                        {a.annualizedRoi != null && (
+                          <span
+                            className={cn(
+                              "ml-1",
+                              a.annualizedRoi >= RISK_FREE_RATE ? "text-up" : "text-warn"
+                            )}
+                            title={
+                              a.annualizedRoi >= RISK_FREE_RATE
+                                ? `Beats the ~${(RISK_FREE_RATE * 100).toFixed(0)}%/yr risk-free rate`
+                                : `Below the ~${(RISK_FREE_RATE * 100).toFixed(0)}%/yr risk-free rate — a T-bill beats it`
+                            }
+                          >
+                            ({(a.annualizedRoi * 100).toFixed(1)}/yr)
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5">
@@ -87,9 +107,12 @@ export function ArbRadar() {
         </table>
       </div>
       <p className="border-t border-border-soft bg-surface px-3 py-2 text-[11px] leading-relaxed text-fg-subtle">
-        *Depth-aware: net profit after walking BOTH order books and applying Kalshi fees — not
-        top-of-book. Assumes both venues resolve identically (verify the rules). ROI is on locked
-        capital; annualized by time-to-resolution.
+        Sorted by cross-exchange <span className="text-warn">spread</span>. *Net profit is
+        depth-aware — after walking BOTH order books and applying Kalshi fees, not top-of-book.
+        ROI is on locked capital, annualized by time-to-resolution: a real arb must clear the
+        ~{(RISK_FREE_RATE * 100).toFixed(0)}%/yr <span className="text-warn">risk-free rate</span>{" "}
+        (amber = below it, so a T-bill beats it — a spread, not an edge). Resolution differences
+        flagged per row; verify the rules.
       </p>
     </div>
   );

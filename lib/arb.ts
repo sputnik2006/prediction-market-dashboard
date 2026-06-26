@@ -1,5 +1,13 @@
 import type { ArbResult, Orderbook, OrderbookLevel, Venue } from "./types";
 
+/**
+ * Risk-free benchmark. A cross-exchange "lock" ties up capital until resolution,
+ * so it only beats doing nothing if its ANNUALIZED return clears the risk-free
+ * rate — otherwise a T-bill dominates it. An arb whose annualizedRoi is below
+ * this isn't a real edge, just a spread. ~6%/yr; override via env.
+ */
+export const RISK_FREE_RATE = Number(process.env.NEXT_PUBLIC_RISK_FREE_RATE ?? 0.06);
+
 export const EMPTY_ARB: ArbResult = {
   hasArb: false,
   buyVenue: null,

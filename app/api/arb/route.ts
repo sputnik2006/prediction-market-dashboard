@@ -48,7 +48,10 @@ async function buildArb(): Promise<ArbResponse> {
     })
   );
 
-  rows.sort((a, b) => b.arb.netProfit - a.arb.netProfit);
+  // Rank by cross-exchange spread (where the venues disagree most), not net PnL
+  // — net PnL just scales with how much size you throw at it.
+  const spreadPct = (r: ArbRow) => Math.abs((r.polyYes ?? 0) - (r.kalshiYes ?? 0));
+  rows.sort((a, b) => spreadPct(b) - spreadPct(a));
   return { rows, venues, updatedAt: new Date().toISOString() };
 }
 
