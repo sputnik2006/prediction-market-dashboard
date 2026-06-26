@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  /* Base surfaces — deep slate, financial-terminal feel */
+  --color-bg: #0a0e17;
+  --color-surface: #111725;
+  --color-surface-2: #182032;
+  --color-border: #243049;
+  --color-border-soft: #1b2336;
+
+  /* Text */
+  --color-fg: #e6ebf5;
+  --color-fg-muted: #94a3c4;
+  --color-fg-subtle: #5f6e8f;
+
+  /* Exchange brand accents */
+  --color-polymarket: #4f8ff7;
+  --color-polymarket-soft: #1d3a63;
+  --color-kalshi: #19c39b;
+  --color-kalshi-soft: #0f4a3c;
+  --color-aggregate: #a78bfa;
+
+  /* Semantic */
+  --color-up: #22c55e;
+  --color-down: #ef4444;
+  --color-warn: #f59e0b;
+  --color-accent: #6366f1;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  border-color: var(--color-border-soft);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-subtle);
+}
+
+/* Numeric / tabular figures for prices */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Thin shimmer for loading skeletons */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface) 25%,
+    var(--color-surface-2) 37%,
+    var(--color-surface) 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
