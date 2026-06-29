@@ -1,23 +1,63 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useArb } from "@/lib/hooks";
 import { ConfidenceBadge, Skeleton, VENUE_LABEL } from "./ui";
 import { DivergenceFlag } from "./DivergencePanel";
+import { PairFilterBar, distinctCategories, type SortOption } from "./PairFilterBar";
 import { divergenceFor } from "@/lib/divergence";
 import { RISK_FREE_RATE } from "@/lib/arb";
 import { cn, formatMoney, formatProb, formatSize } from "@/lib/utils";
+import type { ArbRow } from "@/lib/types";
+
+const SORTS: SortOption[] = [
+  { value: "spread", label: "Spread" },
+  { value: "netprofit", label: "Net profit" },
+  { value: "roi", label: "ROI (ann.)" },
+  { value: "closing", label: "Closing soon" },
+  { value: "volume", label: "Volume" },
+];
+
+const spreadOf = (r: ArbRow) => Math.abs((r.polyYes ?? 0) - (r.kalshiYes ?? 0));
+const closeOf = (r: ArbRow) => (r.closeTime ? new Date(r.closeTime).getTime() : Infinity);
 
 export function ArbRadar() {
   const { data, isLoading } = useArb();
+  const [category, setCategory] = useState("");
+  const [sort, setSort] = useState("spread");
+
   if (isLoading) return <Skeleton className="h-56 w-full" />;
 
-  const rows = data?.rows ?? [];
-  if (!rows.length)
+  const allRows = data?.rows ?? [];
+  if (!allRows.length)
     return <p className="text-sm text-fg-subtle">No matched pairs to scan.</p>;
 
+  const categories = distinctCategories(allRows);
+  const filtered = category ? allRows.filter((r) => r.category === category) : allRows;
+  const rows = [...filtered].sort((a, b) =>
+    sort === "netprofit"
+      ? b.arb.netProfit - a.arb.netProfit
+      : sort === "roi"
+        ? (b.arb.annualizedRoi ?? -Infinity) - (a.arb.annualizedRoi ?? -Infinity)
+        : sort === "closing"
+          ? closeOf(a) - closeOf(b)
+          : sort === "volume"
+            ? (b.volume ?? 0) - (a.volume ?? 0)
+            : spreadOf(b) - spreadOf(a)
+  );
+
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
+    <div className="space-y-3">
+      <PairFilterBar
+        category={category}
+        onCategory={setCategory}
+        categories={categories}
+        sort={sort}
+        onSort={setSort}
+        sortOptions={SORTS}
+      />
+      <div className="overflow-hidden rounded-xl border border-border">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-sm">
           <thead className="bg-surface-2 text-[11px] uppercase tracking-wide text-fg-subtle">
@@ -107,13 +147,13 @@ export function ArbRadar() {
         </table>
       </div>
       <p className="border-t border-border-soft bg-surface px-3 py-2 text-[11px] leading-relaxed text-fg-subtle">
-        Sorted by cross-exchange <span className="text-warn">spread</span>. *Net profit is
-        depth-aware — after walking BOTH order books and applying Kalshi fees, not top-of-book.
-        ROI is on locked capital, annualized by time-to-resolution: a real arb must clear the
-        ~{(RISK_FREE_RATE * 100).toFixed(0)}%/yr <span className="text-warn">risk-free rate</span>{" "}
-        (amber = below it, so a T-bill beats it — a spread, not an edge). Resolution differences
-        flagged per row; verify the rules.
+        *Net profit is depth-aware — after walking BOTH order books and applying Kalshi fees, not
+        top-of-book. ROI is on locked capital, annualized by time-to-resolution: a real arb must
+        clear the ~{(RISK_FREE_RATE * 100).toFixed(0)}%/yr{" "}
+        <span className="text-warn">risk-free rate</span> (amber = below it, so a T-bill beats it —
+        a spread, not an edge). Resolution differences flagged per row; verify the rules.
       </p>
+      </div>
     </div>
   );
 }

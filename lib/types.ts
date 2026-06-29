@@ -199,6 +199,8 @@ export interface ArbRow {
   polyYes: number | null;
   kalshiYes: number | null;
   closeTime: string | null;
+  /** Activity proxy for sorting (max of the venues' volumes). */
+  volume: number | null;
   arb: ArbResult;
 }
 

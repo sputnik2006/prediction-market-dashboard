@@ -26,7 +26,7 @@ async function buildArb(): Promise<ArbResponse> {
   const candidates = pairs
     .filter((p) => p.polymarket && p.kalshi && (p.spread ?? 0) > 0.015)
     .sort((a, b) => (b.spread ?? 0) - (a.spread ?? 0))
-    .slice(0, 24);
+    .slice(0, 40); // enough rows for the client-side category filter / re-sort
 
   const rows: ArbRow[] = await Promise.all(
     candidates.map(async (p): Promise<ArbRow> => {
@@ -43,6 +43,10 @@ async function buildArb(): Promise<ArbResponse> {
         polyYes: p.polymarket!.yesPrice,
         kalshiYes: p.kalshi!.yesPrice,
         closeTime,
+        volume: Math.max(
+          p.polymarket!.volumeTotal ?? p.polymarket!.volume24h ?? 0,
+          p.kalshi!.volumeTotal ?? 0
+        ),
         arb: computeArb(polyBook, kalshiBook, closeTime),
       };
     })
