@@ -94,8 +94,10 @@ function numbersConflict(a: Market, b: Market): boolean {
  * a NOMINEE market, a WINNER market, and a "will they RUN" market — those are
  * NOT the same question and must never be matched together.
  */
-function questionKind(m: Market): "nominee" | "run" | "winner" | null {
+function questionKind(m: Market): "nominee" | "run" | "winner" | "host" | null {
   const t = fullText(m).toLowerCase();
+  // "host the World Cup" / "host the Olympics" is a different question from "win it"
+  if (/\bhost(s|ed|ing)?\b/.test(t)) return "host";
   if (/\b(run for|running for|will run|runs for|candidacy|enter the race|drop out|withdraw)\b/.test(t))
     return "run";
   if (/\b(nominee|nomination|primary)\b/.test(t)) return "nominee";
@@ -107,6 +109,16 @@ function questionConflict(a: Market, b: Market): boolean {
   const ka = questionKind(a);
   const kb = questionKind(b);
   return ka != null && kb != null && ka !== kb;
+}
+
+/**
+ * A combined "A, B or C" market (e.g. a 3-country World Cup *host* bid) must never
+ * fuzzy-match a single-entity market — they're different questions even though they
+ * share a name token.
+ */
+function isMultiEntity(m: Market): boolean {
+  const s = (m.subtitle ?? "").trim();
+  return /,/.test(s) && /\bor\b/i.test(s);
 }
 
 function computeSpread(poly: Market | null, kalshi: Market | null) {
@@ -339,6 +351,7 @@ export function buildPairs(
       if (p.category !== k.category) continue;
       if (numbersConflict(p, k)) continue;
       if (questionConflict(p, k)) continue;
+      if (isMultiEntity(p) || isMultiEntity(k)) continue;
       const score = weightedScore(pt, kTokens[ki]);
       if (score >= FUZZY_THRESHOLD && (!best || score > best.score)) {
         best = { ki, score };
