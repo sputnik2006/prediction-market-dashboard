@@ -1,0 +1,999 @@
+% =============================================================================
+%  Prediction Markets Dashboard -- Technical Submission Report
+%  Build:  tectonic report.tex
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{XCharter}
+\usepackage[charter,scaled=1.04]{newtxmath}
+\usepackage[varqu,scaled=0.96]{zi4}
+\usepackage[margin=2.3cm,top=2.4cm,bottom=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usepackage{caption}
+\usepackage{float}
+\usepackage[section]{placeins}
+\usepackage[hidelinks]{hyperref}
+
+% Floats may not drift past their section; float-only pages align to the top.
+\makeatletter
+\setlength{\@fptop}{0pt}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.75}
+\makeatother
+
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds}
+\tcbuselibrary{skins,breakable}
+
+% ---------------------------------------------------------------- palette ---
+\definecolor{poly}{HTML}{2F6FD0}
+\definecolor{kalshi}{HTML}{0E8F72}
+\definecolor{ink}{HTML}{1A1D23}
+\definecolor{slate}{HTML}{5A6472}
+\definecolor{rule}{HTML}{D6DAE0}
+\definecolor{panel}{HTML}{F4F6F8}
+\definecolor{amber}{HTML}{9A6700}
+\definecolor{danger}{HTML}{B3261E}
+
+\hypersetup{colorlinks=true,linkcolor=poly,urlcolor=poly}
+
+% --------------------------------------------------------------- headings ---
+\titleformat{\section}{\large\bfseries\color{ink}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{ink}}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.3em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.9em}{0.35em}
+
+\captionsetup{font=small,labelfont={bf,color=slate},textfont={color=slate},labelsep=period}
+\setlist{itemsep=1.5pt,parsep=0pt,topsep=3pt}
+\renewcommand{\arraystretch}{1.15}
+
+% --------------------------------------------------------------- listings ---
+\lstdefinestyle{code}{
+  basicstyle=\ttfamily\scriptsize,
+  backgroundcolor=\color{panel},
+  frame=leftline, framerule=1.6pt, rulecolor=\color{rule},
+  xleftmargin=9pt, framexleftmargin=9pt,
+  breaklines=true, showstringspaces=false,
+  columns=fullflexible, keepspaces=true,
+  aboveskip=8pt, belowskip=6pt,
+}
+\lstset{style=code}
+
+% ------------------------------------------------------------------ boxes ---
+\newtcolorbox{keybox}[1][]{
+  enhanced, breakable, colback=panel, colframe=poly,
+  boxrule=0pt, leftrule=2.5pt, arc=1pt,
+  left=8pt,right=8pt,top=6pt,bottom=6pt, #1
+}
+
+\newcommand{\code}[1]{{\ttfamily\small #1}}
+\newcommand{\file}[1]{{\ttfamily\small\color{slate} #1}}
+\newcommand{\PM}{{\color{poly}\textbf{Polymarket}}}
+\newcommand{\KS}{{\color{kalshi}\textbf{Kalshi}}}
+
+% =============================================================================
+\begin{document}
+
+% ------------------------------------------------------------------ title ---
+\begin{center}
+\vspace*{0.4cm}
+{\LARGE\bfseries\color{ink} Prediction Markets Dashboard\par}
+\vspace{0.3em}
+{\large\color{slate} Cross-Exchange Analytics for \textcolor{poly}{Polymarket} $\times$ \textcolor{kalshi}{Kalshi}\par}
+\vspace{0.7em}
+{\normalsize Nikhil Pothuganti \;$\cdot$\; Technical Submission \;$\cdot$\; \today\par}
+\vspace{0.4em}
+{\small\color{slate} Next.js 15 $\cdot$ TypeScript $\cdot$ React 19 $\cdot$
+ 6{,}372 LOC across 57 modules $\cdot$ 3 routes $\cdot$ 11 API endpoints\par}
+\vspace{0.3em}
+\textcolor{rule}{\rule{\textwidth}{0.8pt}}
+\end{center}
+
+% =============================================================================
+\section{Overview}
+
+Prediction markets are fragmented. The same real-world question --- who wins the 2028 US
+presidential election, who lifts the 2026 World Cup --- trades simultaneously on \PM{} and
+\KS{}, at different prices, under different resolution rules, in different units, behind
+different APIs. A price gap between the two venues looks like free money.
+
+It usually is not. This dashboard is built around that claim. It ingests live order books and
+price history from both venues, normalises them into one model, infers which markets on
+either venue are \emph{the same question}, and then subjects every apparent gap to three
+tests a naive spread scanner skips: \textbf{is it fillable} (walk both books, don't quote the
+touch), \textbf{does it survive fees and time} (non-linear \KS{} taker fee; annualise over
+capital lockup), and \textbf{do the two markets actually pay the same} (resolution-equivalence
+assessment).
+
+\begin{keybox}
+\textbf{Design thesis.} A visible price gap is by default \textbf{not} an edge. A spread is
+presented as tradeable only once the match is \textsc{verified}, the depth- and fee-aware net
+edge is positive, and the divergence assessment is shown beside it.
+
+\smallskip
+\textbf{Headline result.} On the 2028 President market, an apparent 8-point gap resolves to
+roughly \textbf{0.8\%/year} once you cross the spread instead of quoting mids, pay the \KS{}
+fee, and account for capital locked until January 2029. A T-bill beats it. Separately, the
+two venues do not settle on the same event --- \KS{} pays on who is \emph{inaugurated},
+\PM{} on the \emph{AP/Fox/NBC race call} --- so the position is not a lock at all.
+\end{keybox}
+
+\noindent Every design decision follows from that thesis: it is why the matcher has four
+guard rails and rejects rather than guesses, why the arbitrage engine walks the book, why
+returns are annualised, and why the divergence layer exists. The system is built to talk you
+out of bad trades as readily as it surfaces good ones.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/overview-analytics.png}
+\caption{Overview page. Per-venue badges (top right) show \KS{} \textsc{live} and \PM{} in
+labeled \textsc{snapshot} mode --- the degradation path of \S\ref{sec:doh}. Below: corpus
+statistics, verified matched pairs, and the arbitrage radar ranked by divergence. The
+fee-adjusted-edge caveat is stated inline under the radar rather than hidden.}
+\label{fig:overview}
+\end{figure}
+
+% =============================================================================
+\section{Architecture}
+
+A single Next.js 15 App Router deployment. There is no separate backend: the server tier is a
+set of route handlers under \file{app/api/}, and they are the only component that talks to an
+upstream venue. That indirection is not incidental --- \KS{} returns \code{403} to any request
+carrying an \code{Origin} header, so a client-side fetch cannot work at all. Proxying
+server-side also keeps optional keys off the client and gives one place to normalise, cache
+and degrade.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize, node distance=0pt,
+  box/.style={draw=rule,line width=0.7pt,rounded corners=2pt,align=center,
+              inner sep=4pt,fill=white,text width=12.4cm},
+  sbox/.style={draw=rule,line width=0.7pt,rounded corners=2pt,align=center,
+               inner sep=4pt,fill=white,text width=3.8cm},
+  lay/.style={draw=rule,line width=0.7pt,rounded corners=3pt,fill=panel,inner sep=6pt},
+  ar/.style={-{Stealth[length=4pt]},draw=slate,line width=0.7pt},
+  lbl/.style={font=\scriptsize\itshape,color=slate},
+]
+\node[box] (br)
+  {Overview \mbox{\file{/}} \;$\cdot$\; Compare \mbox{\file{/compare}} \;$\cdot$\;
+   Detail \mbox{\file{/market/[venue]/[id]}}\\
+   TanStack Query hooks $+$ SSE client};
+\begin{scope}[on background layer]
+  \node[lay,fit=(br),label={[lbl,anchor=west,xshift=2pt]north west:BROWSER}] (brl) {};
+\end{scope}
+
+\node[box,below=13mm of br] (api)
+  {\file{app/api/} \;---\; \code{markets} $\cdot$ \code{market} $\cdot$ \code{history} $\cdot$
+   \code{orderbook} $\cdot$ \code{quote} $\cdot$ \code{pairs} $\cdot$ \code{arb} $\cdot$
+   \code{search} $\cdot$ \code{stats} $\cdot$ \code{status} $\cdot$ \code{stream} (SSE)};
+\node[box,below=2.5mm of api] (dom)
+  {\file{lib/} \;---\; matching (\file{match} $\cdot$ \file{entities} $\cdot$ \file{events.seed})
+   \;$\cdot$\; analytics (\file{arb} $\cdot$ \file{divergence} $\cdot$ \file{series})
+   \;$\cdot$\; infra (\file{doh} $\cdot$ \file{http} $\cdot$ \file{polyws})};
+\begin{scope}[on background layer]
+  \node[lay,fit=(api)(dom),
+        label={[lbl,anchor=west,xshift=2pt]north west:SERVER {\normalfont(Node runtime)}}] (srv) {};
+\end{scope}
+
+\node[sbox,below=13mm of dom.south west,anchor=north west,draw=poly] (upP)
+  {\textcolor{poly}{\textbf{Polymarket}}\\{\scriptsize Gamma $\cdot$ CLOB $\cdot$ WSS}};
+\node[sbox,right=4mm of upP,draw=kalshi] (upK)
+  {\textcolor{kalshi}{\textbf{Kalshi}}\\{\scriptsize api.elections.kalshi.com}};
+\node[sbox,right=4mm of upK] (upF)
+  {PolyRouter $\cdot$ Cloudflare DoH\\{\scriptsize optional $\cdot$ resolver}};
+
+\draw[ar] (brl.south) -- node[lbl,right=2pt]{HTTP $+$ SSE, \code{/api/*} only} (srv.north);
+\draw[ar] (srv.south) -- node[lbl,right=2pt]{normalise $\cdot$ cache $\cdot$ degrade} (upK.north);
+\end{tikzpicture}
+\caption{Request topology. The browser talks only to \code{/api/*}; every upstream call is
+made server-side. Corpus and pair caches are prewarmed at boot (\file{instrumentation.ts}) so
+the first user request does not pay the $\sim$17\,s cold build.}
+\label{fig:arch}
+\end{figure}
+
+\noindent The weight of the codebase sits in \file{lib/} (3{,}297 LOC across 21 modules)
+rather than \file{components/} (2{,}342 across 19) --- this is a data pipeline with a UI, not
+a UI with a data source.
+
+% =============================================================================
+\section{Features}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{4.2cm}Xc@{}}
+\toprule
+\textbf{Feature} & \textbf{What it does} & \textbf{\S} \\
+\midrule
+Cross-exchange comparison &
+  Dual-line probability history for the same question on both venues (1D/1W/1M/3M/All), live
+  spread, fee-adjusted edge, both order books, resolution rules side by side & \ref{sec:arb} \\
+Depth-aware arbitrage &
+  Walks both books level-by-level until the edge collapses; non-linear \KS{} fee; reports
+  fillable size, net profit, ROI, and ROI annualised by resolution date & \ref{sec:arb} \\
+Resolution-divergence layer &
+  Per-event assessment of whether two matched markets actually settle identically, with
+  concrete divergence cases and a worst-case narrative & \ref{sec:div} \\
+Three-tier matching &
+  Event-level entity alignment, curated seed, then IDF-weighted fuzzy fallback behind four
+  guard rails & \ref{sec:match} \\
+Real-time order book &
+  Streams \PM{}'s book tick-by-tick over a server-side WebSocket bridged to the browser via
+  SSE; \KS{} polls at 2\,s (its socket needs auth) & \ref{sec:rt} \\
+Arbitrage radar &
+  Matched pairs ranked by divergence with category filter and sort; net edge shown only for
+  verified matches with positive depth-aware edge & \ref{sec:arb} \\
+Market browser $+$ search &
+  Thousands of markets, server-side sorted and filtered, debounced search fanning out to both
+  venues, infinite scroll & --- \\
+DNS-over-HTTPS reachability &
+  Resolves \PM{} over DoH and connects by IP with correct SNI, so live data works on networks
+  that DNS-block the domain --- no VPN, no proxy & \ref{sec:doh} \\
+Per-venue degradation &
+  Each venue reports \textsc{live}/\textsc{snapshot}/\textsc{offline}; the UI stays functional
+  if one source is unreachable, with the mode labeled everywhere & \ref{sec:doh} \\
+Performance engineering &
+  Five cache layers with stale-while-revalidate and in-flight dedup; boot-time prewarm;
+  incremental chart updates that preserve zoom/pan & \ref{sec:perf} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/compare.png}
+\caption{Cross-exchange comparison. Left: matched pairs with per-venue prices and $\Delta$.
+Right: dual-line probability history (dashed $=$ snapshot, so provenance is visible in the
+mark itself), price and spread tiles, and both venues' full-depth books. The spread tile
+reports the raw 2.0\% gap \emph{and} the 1.0\% fee-adjusted edge (\S\ref{sec:twospread}). The
+panel recomputes arbitrage client-side from the streamed books, so the number tracks the book
+on screen.}
+\label{fig:compare}
+\end{figure}
+
+% =============================================================================
+\section{Core Technical Work}
+
+\subsection{Normalisation}
+
+Everything upstream is coerced into one model (\file{lib/types.ts}) under a single invariant:
+\textbf{all prices and probabilities are floats in $[0,1]$} --- never cents, never $0$--$100$.
+Conversion happens once, inside each venue adapter. A \code{Market} carries a namespaced
+\code{id}, an outcome array, optional \code{tokenIds} parallel to the outcomes (\PM{}, for
+CLOB calls), optional \code{seriesTicker}/\code{eventTicker} (\KS{}, for candlestick URLs),
+and the venue's resolution \code{rules} text, which the divergence layer consumes. Upstream
+wire shapes stay inside their adapter as private interfaces.
+
+One correctness guard is worth noting: deriving a price from a two-sided quote is usually the
+midpoint, but a market maker parking a $1\phi$/$99\phi$ quote yields a meaningless ``50\%''.
+Any two-sided quote wider than $90\phi$ is therefore treated as a placeholder, deferring to
+last trade or reporting \code{null} rather than a confidently wrong 50\%.
+
+\subsection{Cross-exchange matching}
+\label{sec:match}
+
+The hardest problem here. With no shared identifier the join must be inferred from text, and
+a false positive is worse than a miss --- it manufactures a phantom spread between two
+questions that are not the same. Three tiers run in sequence, each consuming markets from a
+shared pool so later tiers see only what earlier ones could not claim.
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{1.5cm}p{3.0cm}Xp{1.9cm}@{}}
+\toprule
+\textbf{Tier} & \textbf{Method} & \textbf{Mechanism} & \textbf{Confidence} \\
+\midrule
+0 --- Event & Entity alignment &
+  A registry maps a \PM{} event slug to a \KS{} series, then aligns \emph{every} outcome by
+  canonical entity. 6 events, $\sim$108 sports pairs. & \textsc{verified} \\
+1 --- Seed & Curated &
+  6 hand-verified pairs, each carrying both a live \PM{} \code{conditionId} and a snapshot id
+  so they populate in either data mode. & \textsc{verified} \\
+2 --- Fuzzy & IDF-weighted overlap &
+  Tokenise with stopwords, stemming and alias expansion; weight by inverse document
+  frequency; block via an inverted index; threshold at $0.6$. & \textsc{fuzzy} \\
+\bottomrule
+\end{tabularx}
+\caption{The matching pipeline. Confidence degrades down the stack, and only
+\textsc{verified} pairs are ever eligible to be presented as arbitrage.}
+\end{table}
+
+\subsubsection*{Tier 0 --- event-level alignment}
+
+A text matcher applied to a categorical event systematically under-performs: it only ``sees''
+the high-volume candidates whose titles happen to be similar. Instead a registry
+(\file{lib/events.seed.ts}) declares the correspondence at the \emph{event} level --- a \PM{}
+event slug and a \KS{} series ticker --- and outcomes are then aligned by canonical entity, so
+the whole field pairs. Six events are registered: 2028 President, the two 2028 nominations,
+the 2026 World Cup ($\sim$46 countries), the 2027 NBA champion (30) and the 2027 Stanley Cup
+(32). Because the \KS{} series is fetched directly rather than read from the paginated corpus,
+a series below the top-volume pages still contributes its full field. Adding a league is one
+registry entry.
+
+Canonicalisation (\file{lib/entities.ts}) keeps alias tables for persons and countries ---
+including a deliberate carve-out keeping \emph{Donald Trump Jr} distinct from \emph{Donald
+Trump}, exactly the collision that would otherwise produce a large spurious spread. Teams use
+token overlap instead, so a new league needs no roster data: \code{Sacramento} matches
+\code{Sacramento Kings}, and \code{LA Clippers} separates from \code{LA Lakers} on the
+distinctive token.
+
+\subsubsection*{Tier 2 --- IDF-weighted fuzzy matching}
+
+Let $T(m)$ be the token set of market $m$ after stopword removal, stemming and alias
+expansion. Over a pool of $N$ documents from both venues:
+
+\begin{equation}
+\mathrm{idf}(t) = \log\!\left(1 + \frac{N}{\mathrm{df}(t)}\right),
+\qquad
+W(m) = \!\!\sum_{t \in T(m)}\!\! \mathrm{idf}(t),
+\qquad
+S(p,k) = \frac{\sum_{t \in T(p) \cap T(k)} \mathrm{idf}(t)}{\min\bigl(W(p), W(k)\bigr)} .
+\end{equation}
+
+\noindent A pair is accepted only if $S \geq 0.6$ subject to two admissibility conditions:
+
+\begin{equation}
+\bigl|T(p) \cap T(k)\bigr| \geq 2
+\qquad\text{and}\qquad
+\exists\, t \in T(p) \cap T(k) : \mathrm{df}(t) \leq 8 .
+\end{equation}
+
+The second --- requiring a \emph{distinctive} shared token --- is what makes the tier usable.
+Every 2028 candidate market shares \code{2028}, \code{president} and \code{nominee}; without a
+rarity requirement they all match each other at high scores. Demanding a token appearing in at
+most 8 documents forces the match to rest on a name. Normalising by $\min(W(p), W(k))$ rather
+than the union is deliberate: venues write titles at different verbosity, and a terse \KS{}
+title should still match a wordy \PM{} one that contains it.
+
+Cost is bounded by an inverted index (only \KS{} markets sharing $\geq 2$ tokens are scored,
+capped at 40 candidates) and by considering only the 600 most liquid \PM{} markets.
+
+\subsubsection*{Guard rails}
+
+Four guards reject a candidate before scoring; two were added specifically to kill bad matches
+found in testing.
+
+\begin{itemize}
+  \item \textbf{Question kind} --- each market is tagged \emph{nominee} / \emph{run} /
+        \emph{winner} / \emph{host} and cross-kind matches are rejected. This keeps ``will
+        country X \emph{win} the World Cup'' apart from ``will country X \emph{host} it'':
+        same entity, near-identical tokens, wildly different prices.
+  \item \textbf{Multi-entity} --- a combined ``A, B or C'' market never matches a
+        single-entity one, however many name tokens they share.
+  \item \textbf{Numbers} --- conflicting numerals or years separate a ``$\geq$25bps'' market
+        from a ``50bps'' one.
+  \item \textbf{Category} --- categories must be equal; cheap and high-precision.
+\end{itemize}
+
+\noindent Post-hoc, a fuzzy pair with spread $> 0.35$ is dropped: two genuinely equivalent
+liquid markets do not disagree by 35 points, so such a gap is far more likely a title
+collision.
+
+\subsection{Depth-aware arbitrage}
+\label{sec:arb}
+
+The naive computation is systematically wrong in the optimistic direction. Differencing
+mid-prices gives an edge you cannot transact --- you buy at the ask, sell at the bid, and the
+size at the touch is often trivial.
+
+On a binary market, holding \textsc{yes} on one venue and \textsc{no} on the other redeems for
+exactly \$1 regardless of outcome. Buying \textsc{no} at $1-b$ is equivalent to selling
+\textsc{yes} at bid $b$, so for a share bought at ask $a$ and hedged against bid $b$:
+
+\begin{equation}
+\text{net edge/share} = b - a - \phi_{\text{buy}}(a) - \phi_{\text{sell}}(1-b),
+\qquad
+\text{capital/share} = a + (1-b),
+\end{equation}
+
+\noindent with $\phi_{\text{kalshi}}(p) = 0.07\,p\,(1-p)$ and $\phi_{\text{polymarket}}(p)=0$.
+The \KS{} fee is maximised at $p=0.5$ and vanishes at the extremes, so a flat fee assumption
+misprices exactly the mid-probability markets where spreads are widest.
+
+The engine performs a two-pointer greedy match --- buy-venue asks ascending against sell-venue
+bids descending, consuming $\min(\text{remaining ask}, \text{remaining bid})$ at each step and
+halting the moment the fee-adjusted edge goes non-positive. Both directions are evaluated and
+the more profitable returned.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\scriptsize,
+  lvl/.style={draw=rule,line width=0.6pt,minimum width=2.2cm,minimum height=4.8mm,anchor=west,align=center},
+  hdr/.style={font=\scriptsize\bfseries,align=center},
+  ar/.style={-{Stealth[length=3.5pt]},line width=0.7pt},
+]
+\node[hdr,color=poly] at (1.1,0.95) {Polymarket asks};
+\node[hdr] at (1.1,0.58) {\normalfont (buy here, cheapest first)};
+\node[hdr,color=kalshi] at (6.9,0.95) {Kalshi bids};
+\node[hdr] at (6.9,0.58) {\normalfont (hedge here, highest first)};
+
+\node[lvl,fill=poly!12] at (0,0)     (a1) {19\% $\times$ 12.8K};
+\node[lvl,fill=poly!8]  at (0,-0.55) (a2) {20\% $\times$ 11.6K};
+\node[lvl,fill=poly!4]  at (0,-1.10) (a3) {21\% $\times$ \ 9.6K};
+\node[lvl,fill=white]   at (0,-1.65) (a4) {22\% $\times$ \ 8.4K};
+
+\node[lvl,fill=kalshi!12] at (5.8,0)     (b1) {23\% $\times$ \ 2.0K};
+\node[lvl,fill=kalshi!8]  at (5.8,-0.55) (b2) {22\% $\times$ \ 1.0K};
+\node[lvl,fill=kalshi!4]  at (5.8,-1.10) (b3) {21\% $\times$ \ 0.5K};
+\node[lvl,fill=white]     at (5.8,-1.65) (b4) {20\% $\times$ \ 1.1K};
+
+\draw[ar,draw=kalshi] (a1.east) -- node[above,color=slate]{fill 2.0K} (b1.west);
+\draw[ar,draw=kalshi] (a2.east) -- node[above,color=slate]{fill 1.0K} (b2.west);
+\draw[ar,draw=amber,dashed] (a3.east) -- node[above,color=amber]{edge $\leq$ 0} (b3.west);
+
+\node[align=left,text width=5.1cm,color=slate,anchor=north west] at (0,-2.3)
+  {\textbf{1:} $b-a=4\phi$, fee $\approx 1.24\phi$, net $\approx 2.76\phi$ on 2.0K.\\
+   \textbf{2:} $b-a=2\phi$, fee $\approx 1.20\phi$, net $\approx 0.80\phi$ on 1.0K.\\
+   \textbf{3:} $b-a=0\phi$ --- edge exhausted, \textbf{halt}.};
+\node[align=left,text width=6.0cm,color=slate,anchor=north west] at (5.4,-2.3)
+  {Top-of-book would report a \textbf{4-point} edge. The walk reports \textbf{3.0K fillable}
+   at a \textbf{2.11$\phi$ average} net edge --- which is then annualised before it is called
+   an opportunity.};
+\end{tikzpicture}
+\caption{The book walk (illustrative sizes). The reported edge is an average over filled size
+rather than the touch; \code{bestEdge} retains the touch for reference, \code{avgEdge} is what
+the position earns.}
+\label{fig:walk}
+\end{figure}
+
+\subsubsection*{Annualisation --- the decisive step}
+
+A cross-exchange lock is not a free roll: capital $a + (1-b)$ per share is committed until
+resolution, which for the 2028 President market is over two years out. So
+
+\begin{equation}
+\mathrm{ROI} = \frac{\text{net profit}}{\text{capital}},
+\qquad
+\mathrm{ROI}_{\text{ann}} = \frac{\mathrm{ROI}}{\tau},
+\qquad
+\tau = \frac{t_{\text{close}} - t_{\text{now}}}{365.25\ \text{days}},
+\end{equation}
+
+\noindent reported only when $\tau > 0.02$ years ($\sim$7 days), below which annualising
+produces meaningless multipliers. The result is benchmarked against a configurable risk-free
+rate (default 6\%/yr): the UI colours $\mathrm{ROI}_{\text{ann}}$ green when it clears the
+benchmark, amber when a Treasury bill would have done better. This is the single most
+important number in the product --- it is what turns the 8-point gap of \S1 into 0.8\%/year,
+shown in amber.
+
+\subsubsection*{Two spread notions, deliberately}
+\label{sec:twospread}
+
+\file{lib/match.ts} computes a naive $|p_{\text{poly}} - p_{\text{kalshi}}|$ with a flat 1\%
+fee buffer: a \emph{ranking pre-filter} that runs over every pair on every corpus rebuild, must
+be cheap, and needs no order book. \file{lib/arb.ts} does the full depth- and fee-aware walk:
+the \emph{decision number}, computed only for pairs that warrant it. The radar therefore ranks
+by the naive spread while reporting the rigorous figure --- net profit scales with size
+deployed and so is a poor sort key, whereas raw divergence is what you want to scan by.
+\S\ref{sec:limits} notes the maintenance cost.
+
+\subsection{Resolution divergence}
+\label{sec:div}
+
+Price analysis cannot detect the failure that matters most: two markets that are the same
+question by every textual and statistical measure but \emph{settle differently}.
+
+\KS{} resolves the 2028 presidential market on who is \textbf{inaugurated} on 20 January 2029.
+\PM{} resolves on who \textbf{wins the election} as called by AP, Fox and NBC, days after
+7 November 2028. In the clean case they agree. They differ in source of truth, in threshold
+(winning versus taking office), and in timing --- and that gap is where an arbitrage ``lock''
+stops being a lock.
+
+\begin{keybox}
+\textbf{Worst case, as surfaced in the UI.} Hold \textsc{yes}-\PM{} $+$ \textsc{no}-\KS{} on
+candidate $X$. The networks call $X$ in November 2028, so \PM{} resolves \textsc{yes} --- that
+leg loses. $X$ then dies or is replaced before inauguration, so someone else is inaugurated and
+\KS{} resolves \textsc{no} for $X$ --- \emph{the hedge leg loses too}. A position a naive
+scanner markets as risk-free loses on both sides.
+\end{keybox}
+
+\noindent An LLM equivalence judge was run over each matched event's actual resolution text and
+its output reviewed, classifying each \code{equivalent} / \code{minor} / \code{divergent} with
+a confidence, concrete divergence cases, and a worst-case narrative. Results are baked into
+\file{lib/divergence.ts} rather than evaluated per request --- resolution criteria change on
+the order of years, so an LLM call per request would be latency for no freshness. Unjudged
+pairs fall back to a generic politics warning rather than silently appearing safe, and the
+assessment surfaces three ways: a panel, a per-pair flag, and a red warning inside the
+arbitrage panel.
+
+The judge is not merely rubber-stamping: both nomination markets came back \code{minor} rather
+than \code{equivalent}, because \PM{} carries an explicit clause locking the result against a
+post-convention replacement while \KS{} is silent --- immaterial in almost every world, but not
+identical.
+
+\subsection{Real-time data path}
+\label{sec:rt}
+
+\PM{}'s CLOB publishes \code{book} and \code{price\_change} over WebSocket. The browser cannot
+consume it directly (same CORS and DNS constraints as the REST path), so the server holds the
+socket and bridges it over Server-Sent Events, with a 15\,s heartbeat and unsubscribe wired to
+the request's abort signal. The client hook layers SSE over a 2\,s poll: the poll paints
+instantly on mount, the stream takes over once connected, avoiding the blank-then-populate
+flash of a stream-only implementation. \KS{} requires API-key auth and request signing for its
+socket (REST market data is public, the socket is not), so its book uses a 2\,s poll --- a
+documented consequence of the venue's auth model, not an implementation gap.
+
+\subsection{Reachability: DNS-over-HTTPS}
+\label{sec:doh}
+
+\PM{} is DNS-blocked on some networks --- notably in India, where ISP resolvers refuse
+\code{*.polymarket.com}. The block is \emph{DNS-only}: the servers and their TLS endpoints
+remain reachable given an address. The app therefore resolves \PM{} over DoH (Cloudflare by
+default) and hands \code{undici} a custom lookup so \code{fetch} connects to the resolved IP
+while presenting the correct SNI and \code{Host}. The same technique is applied to the
+WebSocket. Live \PM{} data works with no VPN and no proxy.
+
+The full chain is \textbf{direct DNS $\rightarrow$ DoH $\rightarrow$ PolyRouter} (only if
+\code{POLYROUTER\_API\_KEY} is set) \textbf{$\rightarrow$ stale cache $\rightarrow$ labeled
+snapshot}. The snapshot is not a static fixture --- it generates deterministic synthetic
+history from a seeded PRNG and a synthetic $\pm 1\phi$ book, so charts and ladders stay
+functional and reproducible. Crucially \code{mode: "snapshot"} propagates through the type
+system to every badge and renders history dashed, so the UI can never present demo data as
+live (visible in Figure~\ref{fig:overview}, where the banner names the block and states the
+remedy).
+
+\subsection{Performance and freshness}
+\label{sec:perf}
+
+The corpus and pair build costs $\sim$17\,s cold. Three mechanisms keep that off the critical
+path. \textbf{Stale-while-revalidate caching} --- corpus (180\,s), pairs (15\,s) and arbitrage
+(20\,s) caches serve stale instantly on expiry and rebuild in background, with in-flight dedup
+so a thundering herd collapses to one fetch; only the very first build ever blocks.
+\textbf{Boot-time prewarming} --- an instrumentation hook drives pairs and arb every 5\,s for
+six attempts, then every 150\,s, deliberately inside the 180\,s TTL.
+\textbf{Incremental rendering} --- charts update through the library's \code{update()} path and
+the book streams over SSE, so only the moving point repaints and the user's zoom/pan is never
+reset by a refresh.
+
+One subtlety shows the degradation philosophy: if \PM{} is live but the event fetch yielded no
+event-level pairs, the cache entry is \emph{backdated} to expire in $\sim$2\,s rather than
+serving a thin result for the full TTL. A transient failure degrades for seconds, not a
+quarter-minute.
+
+\subsection{Time-series alignment}
+
+The charting library positions points by \emph{index}, not timestamp. Feeding it irregular
+points produces a time axis whose labels do not match horizontal positions and, worse, two
+venues' series that drift out of alignment with each other. \file{lib/series.ts} resamples
+every series onto a shared uniform grid per range (capped at 2{,}200 buckets) with
+forward-fill, so index is proportional to time and the two venues line up exactly at every $x$.
+Without this the dual-line comparison in Figure~\ref{fig:compare} would be quietly misleading.
+
+% =============================================================================
+\section{Limitations and Future Work}
+\label{sec:limits}
+
+Stated plainly, because a submission that hides its gaps is less useful than one that maps
+them.
+
+\subsection{Known gaps}
+
+\begin{description}[leftmargin=1.2em,style=nextline,itemsep=3pt]
+  \item[No automated tests.] The most conspicuous gap. The highest-value targets are pure and
+        dependency-free: the fuzzy scorer and its guards, the arbitrage book walk, and the
+        series resampler. The walk especially --- a two-pointer accumulator decrementing size
+        across two ladders is exactly where an off-by-one is silent and yields a
+        plausible-but-wrong number. First thing I would add.
+  \item[Fee model in three places.] The flat 1\% buffer appears in the matcher and again in the
+        comparison view, while the accurate non-linear curve lives in the arbitrage engine. The
+        split is deliberate (\S\ref{sec:twospread}), but the constant should be defined once so
+        a fee change cannot leave the paths disagreeing.
+  \item[Cache pattern duplicated.] The SWR plus in-flight-dedup idiom is written four times
+        with slightly divergent error handling; a generic \code{swrCache<T>(ttl, builder)}
+        would collapse all four. DoH resolution is likewise implemented twice (HTTP and
+        WebSocket) with independent caches.
+  \item[Dead components.] \file{SpreadTable.tsx} and \file{Sparkline.tsx} are unreferenced
+        (\code{SpreadTable} was superseded by the radar), and the README still describes a
+        ``spread table'' on the overview page. Both should go and the line be corrected.
+  \item[No CI, container or deploy manifest.] Development-grade setup only.
+\end{description}
+
+\subsection{Inherent constraints}
+
+\begin{itemize}
+  \item \textbf{One-minute granularity floor} --- both venues cap history there. Sub-minute
+        movement is observable only through the live book and quote.
+  \item \textbf{Volume units are not comparable} --- \PM{} reports USD, \KS{} contract count.
+        Labeled per card and deliberately not converted, since any conversion would be a
+        fabrication.
+  \item \textbf{Divergence coverage is partial} --- three events individually judged, a
+        conservative generic warning elsewhere.
+  \item \textbf{Execution is out of scope} --- the system identifies and sizes opportunities;
+        it does not trade, and makes no claim about slippage between observation and fill.
+\end{itemize}
+
+\subsection{Next steps, in priority order}
+
+\begin{enumerate}
+  \item Unit tests for the matcher, book walk and resampler; property tests asserting the walk
+        never reports negative net edge or size exceeding available depth.
+  \item Extract \code{swrCache<T>} and a single fee module; delete the dead components.
+  \item Extend the event registry (more leagues, non-US elections) and re-run the divergence
+        judge across it.
+  \item Persist a spread time series so the radar can rank by \emph{unusual} divergence
+        relative to a pair's own history rather than absolute gap.
+  \item Add \KS{} WebSocket support behind API-key signing for real-time parity.
+\end{enumerate}
+
+\medskip
+\noindent The most valuable output of this system is frequently negative --- an amber
+annualised ROI under the risk-free line, or a divergence flag explaining how a ``lock'' loses
+both legs. A tool that only ever finds opportunities is not measuring anything.
+
+\clearpage
+% =============================================================================
+\appendix
+\renewcommand{\thesection}{\Alph{section}}
+\section*{Appendix}
+\addcontentsline{toc}{section}{Appendix}
+\vspace{-0.4em}
+
+\begin{keybox}
+Self-contained reference: API surface, data model, configuration, algorithms and operational
+behaviour, sufficient to run, extend or review the system without reading the source.
+\end{keybox}
+
+% -----------------------------------------------------------------------------
+\section{Repository Layout}
+
+\begin{lstlisting}
+instrumentation.ts     Boot hook: prewarm + keep-warm the corpus/pairs caches
+app/api/               11 route handlers -- the entire backend
+app/page.tsx           Overview: stats, spotlight, arb radar, market grid
+app/compare/           Cross-exchange comparison
+app/market/[venue]/[id]/   Single-market detail
+lib/  (21 modules, 3,297 LOC)
+  types.ts             Normalized Market / Orderbook / MarketPair / Divergence / ArbResult
+  kalshi.ts            Kalshi provider: events, candlesticks, orderbook (SWR corpus)
+  polymarket.ts        Polymarket provider: Gamma/CLOB -> PolyRouter -> snapshot
+  polyws.ts            Polymarket order-book WebSocket (over DoH) -> SSE
+  polyrouter.ts        Optional aggregator fallback
+  snapshot.ts          Labeled demo dataset + seeded synthetic history
+  doh.ts               DNS-over-HTTPS resolver for DNS-blocked upstreams
+  aggregate.ts         Corpus -> cross-exchange pairs (cached, SWR)
+  match.ts             Three-tier matcher: event / seed / IDF-weighted fuzzy
+  entities.ts          Person / country / team canonicalizer + alias tables
+  events.seed.ts       Event registry (Polymarket event <-> Kalshi series)
+  pairs.seed.ts        Curated hand-verified pairs
+  arb.ts               Depth-aware fillable arbitrage
+  divergence.ts        Resolution-equivalence assessments + lookup
+  series.ts            Resample irregular points onto a uniform time grid
+  http.ts              Fetch with timeout + backoff; never sends Origin
+  config.ts            Centralized env-overridable configuration
+  hooks.ts / api.ts    TanStack Query hooks (incl. SSE) + typed client
+components/  (19 components, 2,342 LOC)
+  CompareView  ProbabilityChart  ArbRadar  ArbPanel  DivergencePanel  MarketGrid
+  MarketCard  MarketDetail  OrderbookDepth  DepthChart  PairsSpotlight  PairCard
+  PairFilterBar  StatsRow  StatusBanner  Header  ui
+\end{lstlisting}
+
+% -----------------------------------------------------------------------------
+\section{HTTP API}
+
+All endpoints are \code{GET}-only, Node runtime, \code{force-dynamic}, no authentication, no
+mutating endpoints. \code{stale-while-revalidate} is set to $6\times$ \code{s-maxage}.
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{4.6cm}p{4.4cm}Xr@{}}
+\toprule
+\textbf{Endpoint} & \textbf{Parameters} & \textbf{Returns} & \textbf{s-maxage} \\
+\midrule
+\code{/api/markets} & \code{q}, \code{category}, \code{venue}, \code{sort}, \code{offset}, \code{limit}
+  & \code{Paged}\allowbreak\code{MarketsResponse} & 30\,s \\
+\code{/api/market/[venue]/[id]} & path params & \code{Market} & 15\,s \\
+\code{/api/orderbook/[venue]/[id]} & path params & \code{Orderbook} & 1\,s \\
+\code{/api/stream/orderbook/}\newline\code{[venue]/[id]} & path params; \code{400} for \code{kalshi}
+  & \code{text/event-stream} & --- \\
+\code{/api/history} & \code{range}, repeated \code{m} & \code{HistoryResponse} & 60\,s \\
+\code{/api/quote} & repeated \code{m} (max 12) & \code{QuoteResponse} & 1\,s \\
+\code{/api/pairs} & --- & \code{PairsResponse} & 30\,s \\
+\code{/api/arb} & --- & \code{ArbResponse} & 10\,s \\
+\code{/api/search} & \code{q} & \code{SearchResponse} & 60\,s \\
+\code{/api/stats} & --- & \code{StatsResponse} & 30\,s \\
+\code{/api/status} & --- & \code{VenueStatus[]} & 15\,s \\
+\bottomrule
+\end{tabularx}
+\caption{\code{/api/markets} with \code{q} also fans out to \PM{}'s public search, so any
+market is reachable even outside the prefetched corpus. \code{/api/quote} memoises 2\,s in
+process. The SSE stream emits \code{data:} frames carrying a serialised \code{Orderbook} plus a
+15\,s comment heartbeat, torn down on the request's abort signal.}
+\end{table}
+
+% -----------------------------------------------------------------------------
+\section{Data Model}
+
+\textbf{Invariant:} every price and probability is a float in $[0,1]$ --- not cents, not
+$0$--$100$. Conversion happens once, inside each venue adapter. Upstream wire shapes are
+private to their adapter and never cross into the domain model.
+
+\begin{longtable}{@{}p{3.2cm}p{11.7cm}@{}}
+\toprule
+\textbf{Type} & \textbf{Definition} \\
+\midrule
+\endhead
+\code{Venue} & \code{"polymarket" | "kalshi"} \\
+\code{DataMode} & \code{"live" | "snapshot" | "unreachable"} --- drives every UI badge and the
+  dashed-line chart treatment \\
+\code{Category} & Politics, Economics, Crypto, World, Tech, Culture, Sports, Other \\
+\code{Outcome} & \code{id}, \code{name}, \code{price}, \code{bid}, \code{ask} \\
+\code{Market} & \code{id} $=$ \code{\$\{venue\}:\$\{nativeId\}}; \code{title}, \code{subtitle},
+  \code{category}, \code{venue}, \code{mode}; \code{yesPrice}, \code{bid}, \code{ask};
+  \code{volumeTotal}, \code{volume24h}; \code{closeTime}; \code{rules} (resolution text, read by
+  the divergence layer); \code{tokenIds} parallel to outcomes (\PM{});
+  \code{seriesTicker}/\code{eventTicker} (\KS{}) \\
+\code{PricePoint} & \code{\{ t, p \}} --- \code{t} in unix \textbf{seconds}, \code{p} in $[0,1]$ \\
+\code{Orderbook} & \code{bids} descending, \code{asks} ascending, of \code{\{ price, size \}} \\
+\code{VenueStatus} & \code{venue}, \code{mode}, \code{ok}, \code{latencyMs}, \code{message} \\
+\code{MarketPair} & \code{pairId}, \code{title}, \code{category}, \code{polymarket},
+  \code{kalshi}, \code{confidence} (\code{verified|fuzzy|unmatched}), \code{matchMethod}
+  (\code{manual|fuzzy|sports|none}), \code{spread}, \code{edge}, \code{cheaperVenue},
+  \code{notes} \\
+\code{Divergence} & \code{status} (\code{equivalent|minor|divergent}), \code{confidence},
+  \code{divergenceCases[]}, \code{reasoning}, \code{worstCase} \\
+\code{ArbResult} & \code{hasArb}, \code{buyVenue}, \code{sellVenue}, \code{fillableSize},
+  \code{grossProfit}, \code{netProfit}, \code{capital}, \code{roi}, \code{annualizedRoi},
+  \code{avgEdge}, \code{bestEdge} \\
+\bottomrule
+\end{longtable}
+
+% -----------------------------------------------------------------------------
+\section{Upstream Endpoints, Caching and Configuration}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{2.0cm}p{6.2cm}X@{}}
+\toprule
+\textbf{Venue} & \textbf{Endpoint} & \textbf{Purpose} \\
+\midrule
+\KS{} & \code{/events?with\_\allowbreak nested\_markets} & Corpus, paginated (200 events/page) \\
+\KS{} & \code{/markets/\{ticker\}[/orderbook]} & Single market; full-depth ladder \\
+\KS{} & \code{/series/\{s\}/markets/\allowbreak \{t\}/candlesticks} & Probability history \\
+\PM{} & Gamma \code{/markets}, \code{/events?slug=} & Corpus (100/page); event-level fetch \\
+\PM{} & CLOB \code{/book}, \code{/prices-history} & Ladder; probability history \\
+\PM{} & \code{wss://ws-subscriptions-clob} & Live book: \code{book} $+$ \code{price\_change} \\
+Other & PolyRouter; Cloudflare \code{/dns-query} & Optional fallback (needs key); DoH \\
+\bottomrule
+\end{tabularx}
+\caption{Both venues' read endpoints are public and need no key. \KS{} returns fixed-point
+cents and volume as contract count; \PM{}'s Gamma returns \code{outcomes},
+\code{outcomePrices} and \code{clobTokenIds} as JSON-encoded \emph{strings} and volume in USD.
+All outbound requests omit \code{Origin}, since \KS{} \code{403}s any request carrying one.}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{4.6cm}p{1.9cm}X@{}}
+\toprule
+\textbf{Cache layer} & \textbf{TTL} & \textbf{Behaviour} \\
+\midrule
+Per-venue corpus & 180\,s & SWR; in-flight dedup \\
+Cross-exchange pairs & 15\,s & SWR $+$ dedup; backdated to $\sim$2\,s if \PM{} is live but
+  produced no event pairs \\
+Arbitrage rows & 20\,s & SWR \\
+Quote memo / \PM{} events & 2\,s / 90\,s & In-process \\
+DoH / WebSocket IP & 60--900\,s / 300\,s & Derived from record TTL \\
+\bottomrule
+\end{tabularx}
+\caption{Server caches. Client polling (TanStack Query, \code{staleTime} 30\,s): status 20\,s,
+stats 30\,s, markets 60\,s, pairs 20\,s, arb 12\,s, history 30\,s, quote 3\,s, book 2\,s (SSE
+supersedes the book poll once connected). \file{instrumentation.ts} prewarms
+\code{/api/pairs} and \code{/api/arb} every 5\,s for 6 attempts then every 150\,s --- inside
+the 180\,s corpus TTL. It issues HTTP requests rather than importing \file{lib/aggregate}
+because importing pulls the upstream module graph into the instrumentation bundle, where Node
+built-ins fail to resolve.}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{4.6cm}p{2.6cm}X@{}}
+\toprule
+\textbf{Variable} & \textbf{Default} & \textbf{Effect} \\
+\midrule
+\code{POLY\_DOH} & \code{auto} & \code{auto} $=$ direct DNS then DoH on failure; \code{on} $=$
+  always DoH; \code{off} $=$ never \\
+\code{DOH\_RESOLVER} & Cloudflare & DoH endpoint \\
+\code{POLYROUTER\_API\_KEY} & unset & Enables the PolyRouter fallback stage \\
+\code{KALSHI\_BASE\_URL} & \KS{} v2 & Override venue base \\
+\code{POLY\_GAMMA\_URL} / \code{POLY\_CLOB\_URL} & \PM{} hosts & Override (e.g. a reachable mirror) \\
+\code{POLY\_SNAPSHOT} & \code{on} & \code{off} disables the demo fallback; UI shows \textsc{offline} \\
+\code{KALSHI\_PAGES} / \code{POLY\_PAGES} & 4 / 4 & Corpus breadth vs cold-start latency \\
+\code{UPSTREAM\_}\allowbreak\code{TIMEOUT\_MS} & \code{12000} & Per-request upstream timeout \\
+\code{NEXT\_PUBLIC\_RISK\_}\allowbreak\code{FREE\_RATE} & \code{0.06} & Benchmark for annualised
+  ROI; the amber/green threshold \\
+\bottomrule
+\end{tabularx}
+\caption{Every variable is optional --- both venues' public read endpoints work with no key.
+Copy \file{.env.example} to \file{.env.local} to override.}
+\end{table}
+
+% -----------------------------------------------------------------------------
+\section{Algorithm Pseudocode}
+
+\begin{lstlisting}
+WALK(buyAsks, buyVenue, sellBids, sellVenue):
+    asks <- buyAsks sorted ASCENDING ;  bids <- sellBids sorted DESCENDING
+    i, j <- 0, 0 ;  remainingAsk <- asks[0].size ;  remainingBid <- bids[0].size
+    size, gross, net, capital, bestEdge <- 0
+
+    WHILE i < |asks| AND j < |bids|:
+        a <- asks[i].price ;  b <- bids[j].price
+        IF b <= a: BREAK                              // no gross edge left
+        fee    <- FEE(buyVenue, a) + FEE(sellVenue, 1 - b)
+        netPer <- b - a - fee
+        IF netPer <= 0: BREAK                         // fees consumed the edge
+        qty <- MIN(remainingAsk, remainingBid)
+        IF qty <= 0: BREAK
+
+        IF size == 0: bestEdge <- netPer              // edge at the touch
+        size += qty ;  gross += (b - a) * qty ;  net += netPer * qty
+        capital += (a + (1 - b)) * qty                // YES leg + NO leg
+        remainingAsk -= qty ;  remainingBid -= qty
+        IF remainingAsk ~= 0: remainingAsk <- asks[++i].size
+        IF remainingBid ~= 0: remainingBid <- bids[++j].size
+    RETURN { size, gross, net, capital, bestEdge }
+
+FEE(venue, p):  RETURN 0.07 * p * (1 - p) IF venue == kalshi ELSE 0
+
+COMPUTE-ARB(polyBook, kalshiBook, closeTime):
+    d1 <- WALK(poly.asks, poly, kalshi.bids, kalshi)   // buy YES poly, hedge kalshi
+    d2 <- WALK(kalshi.asks, kalshi, poly.bids, poly)   // buy YES kalshi, hedge poly
+    best <- d1 IF d1.net >= d2.net ELSE d2
+    IF best.net <= 0 OR best.size <= 0: RETURN EMPTY_ARB
+    roi   <- best.net / best.capital
+    years <- (closeTime - now) / 365.25 days
+    RETURN { roi, annualizedRoi: roi/years IF years > 0.02 ELSE null,
+             avgEdge: best.net / best.size, ... }
+\end{lstlisting}
+
+\begin{lstlisting}
+BUILD-PAIRS(kalshiMarkets, polyMarkets, eventInputs):
+    // ---- Tier 0: event-level entity alignment -> VERIFIED
+    FOR EACH (eventMatch, eventPolyMarkets) IN eventInputs:
+        kInSeries <- kalshiMarkets WHERE seriesTicker == eventMatch.kalshiSeries
+        kByEntity <- MAP canonicalEntity(m.subtitle, matchBy) -> m
+        FOR EACH p IN eventPolyMarkets NOT IN usedP:
+            k <- kByEntity[canonicalEntity(p.subtitle, matchBy)]
+            IF not found AND matchBy == "team":
+                k <- ARGMAX over unused kInSeries of
+                       |teamTokens(p.subtitle) INTERSECT teamTokens(m.subtitle)|,  >= 1
+            IF k found AND k NOT IN usedK: EMIT pair(p, k, VERIFIED)
+
+    // ---- Tier 1: curated seed -> VERIFIED
+    FOR EACH s IN SEED_PAIRS not already consumed: EMIT pair(..., VERIFIED)
+
+    // ---- Tier 2: IDF-weighted fuzzy -> FUZZY
+    remP, remK <- unconsumed markets ;  df <- document frequency over remP + remK
+    idf   <- t -> log(1 + N / df[t])
+    index <- inverted index: token -> [indices into remK]        // blocking
+
+    FOR EACH p IN the 600 most liquid remP, descending volume:
+        candidates <- kalshi markets sharing >= 2 tokens, top 40 by shared-token count
+        FOR EACH k IN candidates:
+            IF p.category != k.category:              CONTINUE   // guard 1
+            IF numbersConflict(p, k):                 CONTINUE   // guard 2
+            IF questionConflict(p, k):                CONTINUE   // guard 3
+            IF isMultiEntity(p) OR isMultiEntity(k):  CONTINUE   // guard 4
+            TRACK best WEIGHTED-SCORE(tokens(p), tokens(k)) >= 0.60
+        IF best found AND pair.spread <= 0.35: EMIT pair(p, k, FUZZY)
+                                                     // else: title collision, not a match
+
+    SORT BY (verified, fuzzy, unmatched), THEN spread DESCENDING
+
+WEIGHTED-SCORE(a, b):
+    shared <- a INTERSECT b
+    IF |shared| < 2:                       RETURN 0
+    IF NO t IN shared WITH df[t] <= 8:     RETURN 0   // needs a distinctive token
+    RETURN SUM(idf[t] for t in shared) / MIN(weight(a), weight(b))
+\end{lstlisting}
+
+\noindent\textbf{Series resampling.} Pick a per-range bucket width, cap the grid at 2{,}200
+buckets, then forward-fill: for each bucket time $g$, emit the most recent \code{PricePoint}
+with $t \leq g$. Every series shares the identical grid, so the chart library's index-based
+$x$-layout is proportional to time and the two venues align exactly at every $x$.
+
+% -----------------------------------------------------------------------------
+\section{Event Registry and Divergence Assessments}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{2.5cm}p{3.1cm}p{3.4cm}p{1.4cm}X@{}}
+\toprule
+\textbf{Key} & \textbf{Label} & \textbf{Kalshi series} & \textbf{By} & \textbf{Field} \\
+\midrule
+\code{pres-2028} & 2028 U.S. President & \code{KXPRESPERSON} & person & candidates \\
+\code{dem-nom-2028} & 2028 Dem. Nominee & \code{KXPRESNOMD} & person & candidates \\
+\code{rep-nom-2028} & 2028 Rep. Nominee & \code{KXPRESNOMR} & person & candidates \\
+\code{world-cup-2026} & 2026 World Cup & \code{KXMENWORLDCUP} & team & $\sim$46 countries \\
+\code{nba-2027} & 2027 NBA Champion & \code{KXNBA} & team & 30 teams \\
+\code{nhl-2027} & 2027 Stanley Cup & \code{KXNHL} & team & 32 teams \\
+\bottomrule
+\end{tabularx}
+\caption{The registry (\file{lib/events.seed.ts}). Adding a league or election is one entry: a
+\PM{} event slug plus a \KS{} series ticker. The sports entries alone contribute $\sim$108
+verified pairs.}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabularx}{\textwidth}{@{}p{2.5cm}p{1.7cm}c X@{}}
+\toprule
+\textbf{Event} & \textbf{Status} & \textbf{Conf.} & \textbf{Basis} \\
+\midrule
+\code{pres-2028} & \textcolor{danger}{\textbf{divergent}} & 0.84 &
+  \KS{} resolves on \emph{inauguration} (20 Jan 2029); \PM{} on the AP/Fox/NBC \emph{race call}
+  ($\sim$Nov 2028). Different source of truth, threshold and timing. Four divergence cases
+  recorded, including death or withdrawal between call and inauguration. \\
+\code{rep-nom-2028} & \textcolor{amber}{\textbf{minor}} & 0.78 &
+  Both resolve on winning \emph{and accepting} the nomination. \PM{} adds a clause locking the
+  result against a pre-election-day replacement; \KS{} is silent, though a completed-event
+  reading agrees. \\
+\code{dem-nom-2028} & \textcolor{amber}{\textbf{minor}} & 0.78 & As above. \\
+\emph{fallback} & \textcolor{amber}{\textbf{minor}} & 0.50 &
+  Unjudged Politics pairs get a generic warning: venues commonly diverge on who decides, on
+  candidate death or withdrawal, and on ``wins'' versus ``inaugurated'' timing. \\
+\bottomrule
+\end{tabularx}
+\caption{Resolution-equivalence assessments (\file{lib/divergence.ts}), produced by an LLM
+judge over each venue's resolution text and reviewed. Baked in rather than evaluated per
+request.}
+\end{table}
+
+% -----------------------------------------------------------------------------
+\section{Build and Run}
+
+\begin{lstlisting}
+npm install
+npm run dev                      # http://localhost:3000
+npm run build && npm run start   # production
+\end{lstlisting}
+
+\noindent No configuration required: \KS{} is live out of the box, and \PM{} works directly
+wherever DNS resolves it and over DoH where it does not. Expect $\sim$17\,s of cold corpus
+build at boot, absorbed by \file{instrumentation.ts} before the first request.
+
+\medskip
+\noindent\textbf{Verifying degradation.} Point \code{POLY\_GAMMA\_URL} at an unroutable host
+(or set \code{POLY\_DOH=off} on a DNS-blocking network): the badge should flip to
+\textsc{snapshot}, the banner of Figure~\ref{fig:overview} appear, \PM{} history render dashed,
+and every view stay functional.
+
+\medskip
+\noindent\textbf{Compiling this report.} \code{tectonic report.tex}, or \code{pdflatex
+report.tex} run twice. Figures are in \file{report/figures/}.
+
+% -----------------------------------------------------------------------------
+\section{Interface Reference}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/market.png}
+\caption{Single-market detail. Venue and data-mode badges, a deep link to the native venue,
+five statistic tiles, probability history with range selector, the full-depth book with its
+depth chart, and the venue's complete resolution text --- the same text the divergence judge
+consumes. Note the \KS{} wording here: \emph{``the next person inaugurated as President''}.}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/overview-grid.png}
+\caption{Market browser. The full normalised corpus across both venues with category pills, a
+venue segmented control, server-side sort, 300\,ms debounced search that fans out to both
+venues, and infinite scroll (\code{IntersectionObserver}, 700\,px root margin). Every card
+carries venue, category, data mode, price, volume in that venue's own units, and time to
+close.}
+\end{figure}
+
+\end{document}
